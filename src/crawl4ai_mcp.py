@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 from urllib.parse import urlparse, urldefrag
 from xml.etree import ElementTree
 from dotenv import load_dotenv
@@ -23,7 +24,35 @@ import asyncio
 import json
 import os
 import re
+import sys
 import concurrent.futures
+import logging
+
+# Load environment variables from the project root .env file FIRST
+project_root = Path(__file__).resolve().parent.parent
+dotenv_path = project_root / '.env'
+
+# Force override of existing environment variables
+load_dotenv(dotenv_path, override=True)
+
+# Ensure required environment variables are set BEFORE importing utils
+required_env_vars = {
+    'ENABLE_HUGGINGFACE': 'true',
+    'HUGGINGFACE_EMBEDDING_MODEL': 'sentence-transformers/paraphrase-MiniLM-L3-v2',
+    'HUGGINGFACE_USE_API': 'false',
+    'HUGGINGFACE_DEVICE': 'cpu',
+    'EMBEDDING_PROVIDER': 'huggingface',
+    'ENABLE_HUGGINGFACE_LLM': 'false',
+    'ENABLE_OLLAMA_LLM': 'false',
+    'LLM_PROVIDER': 'none'
+}
+
+for key, value in required_env_vars.items():
+    if not os.getenv(key):
+        os.environ[key] = value
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, MemoryAdaptiveDispatcher
 
@@ -39,15 +68,22 @@ from utils import (
     search_code_examples
 )
 
-# Import hiRAG provider
-from hirag_provider import HiRAGProvider
+# Import hiRAG provider (optional)
+try:
+    from hirag_provider import HiRAGProvider
+    HIRAG_AVAILABLE = True
+except ImportError:
+    HiRAGProvider = None
+    HIRAG_AVAILABLE = False
 
-# Load environment variables from the project root .env file
-project_root = Path(__file__).resolve().parent.parent
-dotenv_path = project_root / '.env'
-
-# Force override of existing environment variables
-load_dotenv(dotenv_path, override=True)
+try:
+    from agents.proactive_research_agent import ProactiveResearchAgent, MonitoringType, Priority
+    RESEARCH_AGENT_AVAILABLE = True
+except ImportError:
+    ProactiveResearchAgent = None
+    MonitoringType = None
+    Priority = None
+    RESEARCH_AGENT_AVAILABLE = False
 
 # Create a dataclass for our application context
 @dataclass
@@ -57,6 +93,7 @@ class Crawl4AIContext:
     supabase_client: Client
     reranking_model: Optional[CrossEncoder] = None
     hirag_provider: Optional[HiRAGProvider] = None
+    research_agent: Optional[ProactiveResearchAgent] = None
 
 @asynccontextmanager
 async def crawl4ai_lifespan(server: FastMCP) -> AsyncIterator[Crawl4AIContext]:
@@ -91,21 +128,29 @@ async def crawl4ai_lifespan(server: FastMCP) -> AsyncIterator[Crawl4AIContext]:
             print(f"Failed to load reranking model: {e}")
             reranking_model = None
 
-    # Initialize hiRAG provider if enabled
+    # Initialize hiRAG provider if enabled and available
     hirag_provider = None
-    if os.getenv("USE_HIRAG", "false") == "true":
+    if HIRAG_AVAILABLE and os.getenv("USE_HIRAG", "false") == "true":
         try:
             hirag_provider = HiRAGProvider()
         except Exception as e:
-            print(f"Failed to initialize hiRAG provider: {e}")
             hirag_provider = None
+
+    # Initialize ProactiveResearchAgent if available
+    research_agent = None
+    if RESEARCH_AGENT_AVAILABLE:
+        try:
+            research_agent = ProactiveResearchAgent()
+        except Exception as e:
+            research_agent = None
 
     try:
         yield Crawl4AIContext(
             crawler=crawler,
             supabase_client=supabase_client,
             reranking_model=reranking_model,
-            hirag_provider=hirag_provider
+            hirag_provider=hirag_provider,
+            research_agent=research_agent
         )
     finally:
         # Clean up the crawler
@@ -333,7 +378,7 @@ async def crawl_single_page(ctx: Context, url: str) -> str:
                 meta["chunk_index"] = i
                 meta["url"] = url
                 meta["source"] = source_id
-                meta["crawl_time"] = str(asyncio.current_task().get_coro().__name__)
+                meta["crawl_time"] = datetime.now().isoformat()
                 metadatas.append(meta)
                 
                 # Accumulate word count
@@ -517,7 +562,7 @@ async def smart_crawl_url(ctx: Context, url: str, max_depth: int = 3, max_concur
                 meta["url"] = source_url
                 meta["source"] = source_id
                 meta["crawl_type"] = crawl_type
-                meta["crawl_time"] = str(asyncio.current_task().get_coro().__name__)
+                meta["crawl_time"] = datetime.now().isoformat()
                 metadatas.append(meta)
                 
                 # Accumulate word count
@@ -1680,6 +1725,443 @@ async def search_visual_documents(
             "count": len(results)
         }, indent=2)
         
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def monitor_source_for_changes(ctx: Context, url: str) -> str:
+    """
+    Monitors a URL for changes by comparing the two most recent crawls.
+
+    This tool first crawls the specified URL to ensure the latest version is stored.
+    It then compares this new version with the previously stored version and
+    returns a summary of the differences.
+
+    Args:
+        ctx: The MCP server provided context.
+        url: The URL to monitor for changes.
+
+    Returns:
+        A JSON string summarizing the changes or indicating the status.
+    """
+    try:
+        # Step 1: Crawl the page to get the latest version
+        crawl_summary = await crawl_single_page(ctx, url)
+        crawl_data = json.loads(crawl_summary)
+
+        if not crawl_data.get("success"):
+            return json.dumps({
+                "success": False,
+                "url": url,
+                "error": f"Failed to crawl the URL for comparison: {crawl_data.get('error')}"
+            }, indent=2)
+
+        # Step 2: Initialize the agent and check for updates
+        agent = ProactiveResearchAgent()
+        supabase_client = ctx.request_context.lifespan_context.supabase_client
+        summary_of_changes = await agent.check_for_updates(url, supabase_client)
+
+        return json.dumps({
+            "success": True,
+            "url": url,
+            "crawl_status": "Completed",
+            "change_summary": summary_of_changes
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "url": url,
+            "error": f"An unexpected error occurred: {e}"
+        }, indent=2)
+
+@mcp.tool()
+async def add_research_target(
+    ctx: Context,
+    target: str,
+    monitoring_type: str,
+    frequency_hours: int = 24,
+    priority: str = "medium",
+    keywords: Optional[List[str]] = None,
+    notification_threshold: float = 0.3
+) -> str:
+    """
+    Add a new target for the Proactive Research Agent to monitor.
+
+    This tool configures the autonomous research agent to monitor specific sources for changes,
+    new content, or trends. The agent will proactively notify you of significant discoveries.
+
+    Args:
+        ctx: The MCP server provided context
+        target: URL, topic, or search term to monitor (e.g., "https://example.com", "AI research", "machine learning")
+        monitoring_type: Type of monitoring - options: "url", "keyword", "topic", "arxiv", "news"
+        frequency_hours: How often to check in hours (default: 24)
+        priority: Priority level - options: "low", "medium", "high", "critical" (default: "medium")
+        keywords: Optional list of keywords to look for in content
+        notification_threshold: Significance threshold for notifications (0.0-1.0, default: 0.3)
+
+    Returns:
+        JSON string with the target configuration and assigned ID
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        # Validate monitoring type
+        try:
+            mon_type = MonitoringType(monitoring_type.lower())
+        except ValueError:
+            return json.dumps({
+                "success": False,
+                "error": f"Invalid monitoring type. Valid options: {[t.value for t in MonitoringType]}"
+            }, indent=2)
+
+        # Validate priority
+        try:
+            if Priority is None:
+                return json.dumps({
+                    "success": False,
+                    "error": "Research agent not available"
+                }, indent=2)
+            priority_level = Priority(priority.lower())
+        except ValueError:
+            return json.dumps({
+                "success": False,
+                "error": f"Invalid priority level. Valid options: {[p.value for p in Priority] if Priority else ['low', 'medium', 'high', 'critical']}"
+            }, indent=2)
+
+        # Add the monitoring target
+        target_id = research_agent.add_monitoring_target(
+            target=target,
+            monitoring_type=mon_type,
+            frequency_hours=frequency_hours,
+            priority=priority_level,
+            keywords=keywords,
+            notification_threshold=notification_threshold
+        )
+
+        return json.dumps({
+            "success": True,
+            "target_id": target_id,
+            "target": target,
+            "monitoring_type": monitoring_type,
+            "frequency_hours": frequency_hours,
+            "priority": priority,
+            "keywords": keywords,
+            "notification_threshold": notification_threshold,
+            "message": f"Research target added successfully. Agent will monitor '{target}' every {frequency_hours} hours."
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def remove_research_target(ctx: Context, target_id: str) -> str:
+    """
+    Remove a monitoring target from the Proactive Research Agent.
+
+    Args:
+        ctx: The MCP server provided context
+        target_id: ID of the target to remove (get from list_research_targets)
+
+    Returns:
+        JSON string with removal status
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        removed = research_agent.remove_monitoring_target(target_id)
+
+        if removed:
+            return json.dumps({
+                "success": True,
+                "target_id": target_id,
+                "message": "Research target removed successfully"
+            }, indent=2)
+        else:
+            return json.dumps({
+                "success": False,
+                "error": f"Target with ID '{target_id}' not found"
+            }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def list_research_targets(ctx: Context) -> str:
+    """
+    List all monitoring targets configured for the Proactive Research Agent.
+
+    Args:
+        ctx: The MCP server provided context
+
+    Returns:
+        JSON string with all configured monitoring targets
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        targets = research_agent.list_monitoring_targets()
+
+        return json.dumps({
+            "success": True,
+            "targets": targets,
+            "count": len(targets)
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def start_research_monitoring(ctx: Context) -> str:
+    """
+    Start the autonomous monitoring by the Proactive Research Agent.
+
+    The agent will continuously monitor all configured targets and proactively notify
+    you of significant findings, trends, and changes.
+
+    Args:
+        ctx: The MCP server provided context
+
+    Returns:
+        JSON string with monitoring status
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+        supabase_client = ctx.request_context.lifespan_context.supabase_client
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        if research_agent.is_running:
+            return json.dumps({
+                "success": False,
+                "error": "Research monitoring is already running"
+            }, indent=2)
+
+        # Start monitoring in background
+        asyncio.create_task(research_agent.start_monitoring(supabase_client))
+
+        return json.dumps({
+            "success": True,
+            "message": "Proactive Research Agent monitoring started",
+            "targets_count": len(research_agent.targets),
+            "status": "monitoring"
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def stop_research_monitoring(ctx: Context) -> str:
+    """
+    Stop the autonomous monitoring by the Proactive Research Agent.
+
+    Args:
+        ctx: The MCP server provided context
+
+    Returns:
+        JSON string with stopping status
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        if not research_agent.is_running:
+            return json.dumps({
+                "success": False,
+                "error": "Research monitoring is not currently running"
+            }, indent=2)
+
+        research_agent.stop_monitoring()
+
+        return json.dumps({
+            "success": True,
+            "message": "Proactive Research Agent monitoring stopped",
+            "status": "stopped"
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def get_research_findings(ctx: Context, hours: int = 24) -> str:
+    """
+    Get recent findings from the Proactive Research Agent.
+
+    Args:
+        ctx: The MCP server provided context
+        hours: Number of hours to look back for findings (default: 24)
+
+    Returns:
+        JSON string with recent research findings
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        findings = research_agent.get_recent_findings(hours)
+
+        # Convert findings to dict format
+        findings_data = []
+        for finding in findings:
+            findings_data.append({
+                "id": finding.id,
+                "target_id": finding.target_id,
+                "title": finding.title,
+                "summary": finding.summary,
+                "significance_score": finding.significance_score,
+                "url": finding.url,
+                "keywords_matched": finding.keywords_matched,
+                "timestamp": finding.timestamp
+            })
+
+        return json.dumps({
+            "success": True,
+            "findings": findings_data,
+            "count": len(findings_data),
+            "timeframe_hours": hours
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def generate_research_report(ctx: Context, hours: int = 24) -> str:
+    """
+    Generate a comprehensive research report from recent findings.
+
+    This tool uses AI to analyze all recent findings and generate a structured report
+    with trends, insights, and recommendations.
+
+    Args:
+        ctx: The MCP server provided context
+        hours: Number of hours to include in the report (default: 24)
+
+    Returns:
+        JSON string with the generated research report
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        report = await research_agent.generate_research_report(hours)
+
+        return json.dumps({
+            "success": True,
+            "report": report,
+            "timeframe_hours": hours,
+            "generated_at": datetime.now().isoformat()
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, indent=2)
+
+@mcp.tool()
+async def get_research_status(ctx: Context) -> str:
+    """
+    Get the current status of the Proactive Research Agent.
+
+    Args:
+        ctx: The MCP server provided context
+
+    Returns:
+        JSON string with agent status information
+    """
+    try:
+        research_agent = ctx.request_context.lifespan_context.research_agent
+
+        if not research_agent or not RESEARCH_AGENT_AVAILABLE:
+            return json.dumps({
+                "success": False,
+                "error": "Proactive Research Agent not initialized"
+            }, indent=2)
+
+        status = {
+            "is_running": research_agent.is_running,
+            "targets_count": len(research_agent.targets),
+            "total_findings": len(research_agent.findings),
+            "recent_findings_24h": len(research_agent.get_recent_findings(24)),
+            "targets": []
+        }
+
+        # Add target summary
+        for target in research_agent.targets.values():
+            target_info = {
+                "id": target.id,
+                "type": target.type.value,
+                "target": target.target,
+                "priority": target.priority.value,
+                "frequency_hours": target.frequency_hours,
+                "last_checked": target.last_checked,
+                "findings_count": len(research_agent.get_findings_by_target(target.id))
+            }
+            status["targets"].append(target_info)
+
+        return json.dumps({
+            "success": True,
+            "status": status
+        }, indent=2)
+
     except Exception as e:
         return json.dumps({
             "success": False,

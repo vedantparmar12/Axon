@@ -1,0 +1,294 @@
+
+{
+  "name": "mcp-crawl4ai-rag",
+  "description": "MCP server for RAG and web crawling with Crawl4AI, with self-improvement features and support for open-source LLMs and visual document processing.",
+  "mcp_server_config": {
+    "command": [
+      "python",
+      "src/crawl4ai_mcp.py"
+    ],
+    "env": {
+      "TRANSPORT": "stdio"
+    },
+    "working_directory": "."
+  },
+  "tools": [
+    {
+      "name": "crawl_single_page",
+      "description": "Crawl a single web page and store its content in Supabase. This tool is ideal for quickly retrieving content from a specific URL without following links. The content is stored in Supabase for later retrieval and querying.",
+      "parameters": [
+        {
+          "name": "url",
+          "description": "URL of the web page to crawl",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "smart_crawl_url",
+      "description": "Intelligently crawl a URL based on its type and store content in Supabase. This tool automatically detects the URL type and applies the appropriate crawling method: For sitemaps: Extracts and crawls all URLs in parallel. For text files (llms.txt): Directly retrieves the content. For regular webpages: Recursively crawls internal links up to the specified depth. All crawled content is chunked and stored in Supabase for later retrieval and querying.",
+      "parameters": [
+        {
+          "name": "url",
+          "description": "URL to crawl (can be a regular webpage, sitemap.xml, or .txt file)",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "max_depth",
+          "description": "Maximum recursion depth for regular URLs (default: 3)",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "max_concurrent",
+          "description": "Maximum number of concurrent browser sessions (default: 10)",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "chunk_size",
+          "description": "Maximum size of each content chunk in characters (default: 1000)",
+          "type": "integer",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "get_available_sources",
+      "description": "Get all available sources from the sources table. This tool returns a list of all unique sources (domains) that have been crawled and stored in the database, along with their summaries and statistics. This is useful for discovering what content is available for querying. Always use this tool before calling the RAG query or code example query tool with a specific source filter!",
+      "parameters": []
+    },
+    {
+      "name": "perform_rag_query",
+      "description": "Perform a RAG (Retrieval Augmented Generation) query on the stored content. This tool searches the vector database for content relevant to the query and returns the matching documents. Optionally filter by source domain. Get the source by using the get_available_sources tool before calling this search!",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "The search query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "description": "Optional source domain to filter results (e.g., 'example.com')",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "match_count",
+          "description": "Maximum number of results to return (default: 5)",
+          "type": "integer",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "search_code_examples",
+      "description": "Search for code examples relevant to the query. This tool searches the vector database for code examples relevant to the query and returns the matching examples with their summaries. Optionally filter by source_id. Get the source_id by using the get_available_sources tool before calling this search! Use the get_available_sources tool first to see what sources are available for filtering.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "The search query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source_id",
+          "description": "Optional source ID to filter results (e.g., 'example.com')",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "match_count",
+          "description": "Maximum number of results to return (default: 5)",
+          "type": "integer",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "hirag_query",
+      "description": "Perform a hierarchical RAG query using hiRAG for advanced entity-based retrieval. This tool uses hierarchical knowledge graphs and entity clustering to provide more comprehensive and contextual answers compared to standard RAG.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "The search query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "mode",
+          "description": "Query mode - options: hi, hi_global, hi_local, hi_bridge, hi_nobridge, naive",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "top_k",
+          "description": "Number of results to return (default: 10)",
+          "type": "integer",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "hirag_get_entity_graph",
+      "description": "Get the entity knowledge graph structure from hiRAG. This tool returns the entities and relationships discovered by hiRAG for visualization or analysis purposes.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "Optional query to filter entities",
+          "type": "string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "hirag_get_communities",
+      "description": "Get the detected communities from hiRAG's entity clustering. This tool returns the communities/clusters of entities discovered by hiRAG along with their summaries and member entities.",
+      "parameters": []
+    },
+    {
+      "name": "hirag_add_documents",
+      "description": "Add documents to hiRAG for hierarchical processing and entity extraction. This tool processes documents through hiRAG's pipeline to extract entities, build knowledge graphs, and create hierarchical clusters.",
+      "parameters": [
+        {
+          "name": "documents",
+          "description": "List of documents, each with 'id', 'content', and 'metadata' keys",
+          "type": "array",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "hirag_clear_cache",
+      "description": "Clear hiRAG cache and reinitialize the knowledge graph. This tool clears all cached data in hiRAG including entities, relationships, and community structures.",
+      "parameters": []
+    },
+    {
+      "name": "hirag_get_stats",
+      "description": "Get hiRAG system statistics and configuration. This tool returns information about hiRAG's current configuration and system statistics.",
+      "parameters": []
+    },
+    {
+      "name": "self_heal_system",
+      "description": "Automatically diagnose and fix system issues. This tool uses intelligent agents to identify problems, validate dependencies, debug code, and test fixes before applying them to ensure system stability.",
+      "parameters": [
+        {
+          "name": "issue_description",
+          "description": "Description of the issue to fix",
+          "type": "string",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "evolve_rag_capability",
+      "description": "Evolve the RAG system with new capabilities. This tool allows the system to self-improve by analyzing feature requests, crawling relevant documentation, generating implementation code, and safely deploying new features after thorough testing.",
+      "parameters": [
+        {
+          "name": "feature_request",
+          "description": "Description of the desired feature",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "documentation_urls",
+          "description": "Optional URLs to crawl for implementation reference",
+          "type": "array",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "perform_rag_query_with_metrics",
+      "description": "Enhanced RAG query with correctness evaluation metrics. This tool performs standard RAG queries while also evaluating the correctness of results using multiple metrics including factual accuracy, ROUGE scores, nDCG ranking quality, and code quality assessment.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "The search query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "source",
+          "description": "Optional domain/source to filter results",
+          "type": "string",
+          "required": false
+        },
+        {
+          "name": "match_count",
+          "description": "Maximum number of results to return (default: 5)",
+          "type": "integer",
+          "required": false
+        },
+        {
+          "name": "enable_evaluation",
+          "description": "Whether to calculate correctness metrics (default: True)",
+          "type": "boolean",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "get_system_metrics",
+      "description": "Get comprehensive system metrics and evaluation history. This tool provides insights into the system's performance, correctness trends, and evolution history to help monitor and improve the RAG system over time.",
+      "parameters": []
+    },
+    {
+      "name": "process_visual_document",
+      "description": "Process a visual document (PDF page, screenshot, etc.) using ColPali.",
+      "parameters": [
+        {
+          "name": "image_path",
+          "description": "Path to the image file",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "doc_id",
+          "description": "Unique identifier for the document",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "text_content",
+          "description": "Optional extracted text for hybrid search",
+          "type": "string",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "search_visual_documents",
+      "description": "Search visual documents using ColPali's late interaction retrieval.",
+      "parameters": [
+        {
+          "name": "query",
+          "description": "Search query",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "top_k",
+          "description": "Number of results to return",
+          "type": "integer",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "monitor_source_for_changes",
+      "description": "Monitors a URL for changes by comparing the two most recent crawls. This tool first crawls the specified URL to ensure the latest version is stored. It then compares this new version with the previously stored version and returns a summary of the differences.",
+      "parameters": [
+        {
+          "name": "url",
+          "description": "The URL to monitor for changes.",
+          "type": "string",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

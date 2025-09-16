@@ -38,9 +38,9 @@ class LLMManager:
                     model_name=model,
                     base_url=base_url
                 )
-                print(f"Initialized Ollama LLM with model: {model}")
+                pass  # LLM initialized
             except Exception as e:
-                print(f"Failed to initialize Ollama LLM: {e}")
+                pass  # Failed to initialize
         
         # HuggingFace
         if os.getenv("ENABLE_HUGGINGFACE_LLM", "true").lower() == "true":
@@ -58,9 +58,9 @@ class LLMManager:
                     load_in_4bit=load_in_4bit,
                     load_in_8bit=load_in_8bit
                 )
-                print(f"Initialized HuggingFace LLM with model: {model}")
+                pass  # LLM initialized
             except Exception as e:
-                print(f"Failed to initialize HuggingFace LLM: {e}")
+                pass  # Failed to initialize
         
         if not self.providers:
             raise ValueError("No LLM providers could be initialized.")

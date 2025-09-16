@@ -1,0 +1,66 @@
+{
+  "name": "crawl4ai-research-agent",
+  "version": "1.0.0",
+  "description": "MCP server for web crawling with RAG capabilities using local Ollama models",
+  "server": {
+    "command": "docker",
+    "args": [
+      "run",
+      "--rm",
+      "-i",
+      "--network", "mcp-crawl4ai-rag_mcp-network",
+      "--add-host", "host.docker.internal:host-gateway",
+      "-e", "OLLAMA_BASE_URL=http://ollama:11434",
+      "-e", "EMBEDDING_PROVIDER=ollama",
+      "-e", "LLM_PROVIDER=ollama",
+      "-e", "USE_HIRAG=true",
+      "-e", "TRANSPORT=stdio",
+      "mcp-crawl4ai:latest"
+    ],
+    "env": {
+      "DOCKER_SOCKET": "/var/run/docker.sock"
+    }
+  },
+  "capabilities": {
+    "tools": [
+      {
+        "name": "crawl_url",
+        "description": "Crawl websites with automatic method detection and RAG storage"
+      },
+      {
+        "name": "search_documents",
+        "description": "Search through crawled content using embeddings"
+      },
+      {
+        "name": "advanced_search",
+        "description": "Advanced search with filters and ranking"
+      },
+      {
+        "name": "setup_monitoring",
+        "description": "Set up proactive monitoring for research"
+      },
+      {
+        "name": "trigger_research",
+        "description": "Trigger research analysis"
+      }
+    ],
+    "resources": [
+      {
+        "name": "crawled_content",
+        "description": "Access to crawled and processed content"
+      },
+      {
+        "name": "research_findings",
+        "description": "Research agent findings and reports"
+      }
+    ]
+  },
+  "security": {
+    "sandbox": true,
+    "network_isolation": true,
+    "resource_limits": {
+      "memory": "2g",
+      "cpu": "2"
+    }
+  }
+}

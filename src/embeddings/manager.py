@@ -38,30 +38,27 @@ class EmbeddingManager:
             try:
                 model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
                 self.providers["openai"] = OpenAIEmbeddingProvider(model=model)
-                print(f"Initialized OpenAI embeddings with model: {model}")
             except Exception as e:
-                print(f"Failed to initialize OpenAI provider: {e}")
-        
+                pass  # Silently fail
+
         # Cohere
         if os.getenv("COHERE_API_KEY"):
             try:
                 model = os.getenv("COHERE_EMBEDDING_MODEL", "embed-english-v3.0")
                 use_v2 = os.getenv("COHERE_USE_V2", "false").lower() == "true"
                 self.providers["cohere"] = CohereEmbeddingProvider(model=model, use_v2=use_v2)
-                print(f"Initialized Cohere embeddings with model: {model} (v2: {use_v2})")
             except Exception as e:
-                print(f"Failed to initialize Cohere provider: {e}")
-        
+                pass  # Silently fail
+
         # Ollama (check if running)
         if os.getenv("ENABLE_OLLAMA", "false").lower() == "true":
             try:
                 model = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
                 base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
                 self.providers["ollama"] = OllamaEmbeddingProvider(model=model, base_url=base_url)
-                print(f"Initialized Ollama embeddings with model: {model}")
             except Exception as e:
-                print(f"Failed to initialize Ollama provider: {e}")
-        
+                pass  # Silently fail
+
         # HuggingFace
         if os.getenv("ENABLE_HUGGINGFACE", "false").lower() == "true":
             try:
@@ -69,16 +66,15 @@ class EmbeddingManager:
                 use_api = os.getenv("HUGGINGFACE_USE_API", "false").lower() == "true"
                 api_token = os.getenv("HUGGINGFACE_API_TOKEN") if use_api else None
                 device = os.getenv("HUGGINGFACE_DEVICE", "cpu")
-                
+
                 self.providers["huggingface"] = HuggingFaceEmbeddingProvider(
                     model=model,
                     use_api=use_api,
                     api_token=api_token,
                     device=device
                 )
-                print(f"Initialized HuggingFace embeddings with model: {model} (API: {use_api})")
             except Exception as e:
-                print(f"Failed to initialize HuggingFace provider: {e}")
+                pass  # Silently fail
         
         if not self.providers:
             raise ValueError("No embedding providers could be initialized. Please check your environment variables.")
@@ -91,7 +87,7 @@ class EmbeddingManager:
         else:
             self.current_provider = list(self.providers.keys())[0]
         
-        print(f"Using {self.current_provider} as the default embedding provider")
+        # Provider selected silently
     
     def _select_best_provider(self) -> str:
         """

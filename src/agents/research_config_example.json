@@ -1,0 +1,41 @@
+{
+  "targets": [
+    {
+      "id": "arxiv001",
+      "type": "arxiv",
+      "target": "artificial intelligence",
+      "frequency_hours": 12,
+      "priority": "high",
+      "keywords": ["neural networks", "deep learning", "transformer", "AI safety"],
+      "notification_threshold": 0.6,
+      "last_checked": null,
+      "last_content_hash": null,
+      "created_at": "2024-01-01T00:00:00"
+    },
+    {
+      "id": "url001",
+      "type": "url",
+      "target": "https://openai.com/blog",
+      "frequency_hours": 6,
+      "priority": "critical",
+      "keywords": ["GPT", "ChatGPT", "OpenAI", "language model"],
+      "notification_threshold": 0.4,
+      "last_checked": null,
+      "last_content_hash": null,
+      "created_at": "2024-01-01T00:00:00"
+    },
+    {
+      "id": "topic001",
+      "type": "keyword",
+      "target": "machine learning research",
+      "frequency_hours": 24,
+      "priority": "medium",
+      "keywords": ["ML", "research", "paper", "algorithm", "model"],
+      "notification_threshold": 0.3,
+      "last_checked": null,
+      "last_content_hash": null,
+      "created_at": "2024-01-01T00:00:00"
+    }
+  ],
+  "last_updated": "2024-01-01T00:00:00"
+}
