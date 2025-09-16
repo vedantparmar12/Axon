@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # Ollama service for local LLM and embedding models
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mcp-network
+
+  # No model initialization needed - models already downloaded
+
+  # MCP Crawl4AI Server
+  mcp-crawl4ai:
+    image: mcp-crawl4ai:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-crawl4ai-server
+    ports:
+      - "8080:8080"
+    environment:
+      # Embedding configuration - use Ollama with embeddinggemma
+      - EMBEDDING_PROVIDER=ollama
+      - ENABLE_OLLAMA=true
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_EMBEDDING_MODEL=ai/embeddinggemma
+
+      # LLM configuration - use Ollama with smollm3
+      - LLM_PROVIDER=ollama
+      - ENABLE_OLLAMA_LLM=true
+      - OLLAMA_LLM_MODEL=ai/smollm3
+
+      # Disable other providers
+      - ENABLE_HUGGINGFACE=false
+      - ENABLE_HUGGINGFACE_LLM=false
+
+      # hiRAG configuration
+      - USE_HIRAG=true
+
+      # Research agent configuration
+      - USE_AGENTIC_RAG=true
+      - USE_CONTEXTUAL_EMBEDDINGS=true
+
+      # MCP configuration
+      - TRANSPORT=stdio
+      - MCP_GATEWAY_MODE=true
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - mcp-network
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+    driver: local
+
+networks:
+  mcp-network:
+    driver: bridge

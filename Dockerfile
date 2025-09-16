@@ -1,37 +1,47 @@
-FROM python:3.12-slim
+# Use Python 3.11 slim image
+FROM python:3.11-slim
 
-ARG PORT=8051
-
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies for various packages
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    git \
-    curl \
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN pip install uv
+# Install additional dependencies for hiRAG that do not change often
+RUN pip install --no-cache-dir \
+    nano-vectordb \
+    chromadb \
+    qdrant-client \
+    weaviate-client
 
-# Copy the MCP server files
-COPY . .
+# Copy requirements first for better caching
+COPY requirements.txt .
 
-# Install packages directly to the system (no virtual environment)
-# Combining commands to reduce Docker layers
-# Install base dependencies and all optional dependencies
-RUN uv pip install --system -e ".[all]" && \
-    crawl4ai-setup && \
-    # Download NLTK data
-    python -c "import nltk; nltk.download('punkt'); nltk.download('averaged_perceptron_tagger')"
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Set environment variables for better compatibility
-ENV PYTHONUNBUFFERED=1
-ENV TOKENIZERS_PARALLELISM=false
+# Copy the source code
+COPY src/ ./src/
 
-EXPOSE ${PORT}
+# Create a default .env file (environment variables will come from Docker Compose)
+RUN echo "# Environment variables provided by Docker Compose" > .env
+
+# Create data and logs directories
+RUN mkdir -p /app/data /app/logs
+
+# Set Python path
+ENV PYTHONPATH=/app/src
+
+# Expose port for MCP server
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8080/health')" || exit 1
 
 # Command to run the MCP server
 CMD ["python", "src/crawl4ai_mcp.py"]

@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "crawl4ai-research-agent": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--network", "mcp-crawl4ai-rag_mcp-network",
+        "--add-host", "host.docker.internal:host-gateway",
+        "mcp-crawl4ai:latest"
+      ],
+      "env": {
+        "DOCKER_SOCKET": "/var/run/docker.sock"
+      }
+    }
+  }
+}

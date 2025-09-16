@@ -94,13 +94,11 @@ class HuggingFaceEmbeddingProvider(BaseEmbeddingProvider):
             if not SENTENCE_TRANSFORMERS_AVAILABLE:
                 raise ImportError("sentence-transformers is required for local inference. Install with: pip install sentence-transformers")
             
-            print(f"Loading model {model}...")
             self.model = SentenceTransformer(model, device=device)
-            
+
             # Get actual dimension from model
             test_embedding = self.model.encode("test", convert_to_numpy=True)
             self.dimension = len(test_embedding)
-            print(f"Model loaded. Embedding dimension: {self.dimension}")
         
         # Set metadata
         self.metadata = {

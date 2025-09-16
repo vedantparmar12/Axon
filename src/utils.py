@@ -19,8 +19,12 @@ from llm.manager import LLMManager
 # Initialize embedding manager
 embedding_manager = EmbeddingManager(default_provider=os.getenv("EMBEDDING_PROVIDER", "auto"))
 
-# Initialize LLM manager for open-source models
-llm_manager = LLMManager(default_provider=os.getenv("LLM_PROVIDER", "auto"))
+# Initialize LLM manager for open-source models (optional)
+try:
+    llm_manager = LLMManager(default_provider=os.getenv("LLM_PROVIDER", "auto"))
+except ValueError:
+    # No LLM providers available, create a dummy manager
+    llm_manager = None
 
 # Keep OpenAI API key for backward compatibility (if needed)
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -94,10 +98,10 @@ def generate_contextual_embedding(full_document: str, chunk: str) -> Tuple[str, 
         - The contextual text that situates the chunk within the document
         - Boolean indicating if contextual embedding was performed
     """
-    # Check if contextual embeddings are enabled
-    if os.getenv("USE_CONTEXTUAL_EMBEDDINGS", "false") != "true":
+    # Check if contextual embeddings are enabled and LLM manager is available
+    if os.getenv("USE_CONTEXTUAL_EMBEDDINGS", "false") != "true" or llm_manager is None:
         return chunk, False
-    
+
     try:
         # Create the prompt for generating contextual information
         prompt = f"""Here is the chunk we want to situate within the whole document 
@@ -183,7 +187,8 @@ def add_documents_to_supabase(
     try:
         if unique_urls:
             # Use the .in_() filter to delete all records with matching URLs
-            client.table("crawled_pages").delete().in_("url", unique_urls).execute()
+            # client.table("crawled_pages").delete().in_("url", unique_urls).execute()
+            pass  # Temporarily disabled batch delete
     except Exception as e:
         print(f"Batch delete failed: {e}. Trying one-by-one deletion as fallback.")
         # Fallback: delete records one by one
@@ -439,8 +444,8 @@ def generate_code_example_summary(code: str, context_before: str, context_after:
     Returns:
         A summary of what the code example demonstrates
     """
-    # Check if Agentic RAG is enabled
-    if os.getenv("USE_AGENTIC_RAG", "false") != "true":
+    # Check if Agentic RAG is enabled and LLM manager is available
+    if os.getenv("USE_AGENTIC_RAG", "false") != "true" or llm_manager is None:
         return "Code example for demonstration purposes."
     
     # Create the prompt
@@ -645,7 +650,7 @@ def extract_source_summary(source_id: str, content: str, max_length: int = 500) 
     # Default summary if we can't extract anything meaningful
     default_summary = f"Content from {source_id}"
     
-    if not content or len(content.strip()) == 0:
+    if not content or len(content.strip()) == 0 or llm_manager is None:
         return default_summary
     
     # Limit content length to avoid token limits
